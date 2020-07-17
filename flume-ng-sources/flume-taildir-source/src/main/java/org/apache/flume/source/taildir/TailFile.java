@@ -28,6 +28,10 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.Map;
 
@@ -42,7 +46,8 @@ public class TailFile {
   private static final int BUFFER_SIZE = 8192;
   private static final int NEED_READING = -1;
 
-  private RandomAccessFile raf;
+//  private RandomAccessFile raf;
+private FileChannel inChannel;
   private final String path;
   private final long inode;
   private long pos;
@@ -56,9 +61,12 @@ public class TailFile {
 
   public TailFile(File file, Map<String, String> headers, long inode, long pos)
       throws IOException {
-    this.raf = new RandomAccessFile(file, "r");
+//    this.raf = new RandomAccessFile(file, "r");
+    this.inChannel = FileChannel.open(Paths.get(file.getAbsolutePath()), StandardOpenOption.READ);
+
     if (pos > 0) {
-      raf.seek(pos);
+//      raf.seek(pos);
+      inChannel.position(pos);
       lineReadPos = pos;
     }
     this.path = file.getAbsolutePath();
@@ -70,11 +78,13 @@ public class TailFile {
     this.oldBuffer = new byte[0];
     this.bufferPos = NEED_READING;
   }
-
-  public RandomAccessFile getRaf() {
-    return raf;
-  }
-
+//
+//  public RandomAccessFile getRaf() {
+//    return raf;
+//  }
+public FileChannel getFileChannel(){
+  return inChannel;
+}
   public String getPath() {
     return path;
   }
@@ -129,7 +139,8 @@ public class TailFile {
     return false;
   }
   public void updateFilePos(long pos) throws IOException {
-    raf.seek(pos);
+//    raf.seek(pos);
+    inChannel.position(pos);
     lineReadPos = pos;
     bufferPos = NEED_READING;
     oldBuffer = new byte[0];
@@ -156,8 +167,10 @@ public class TailFile {
       return null;
     }
     if (backoffWithoutNL && !line.lineSepInclude) {
+//      logger.info("Backing off in file without newline: "
+//          + path + ", inode: " + inode + ", pos: " + raf.getFilePointer());
       logger.info("Backing off in file without newline: "
-          + path + ", inode: " + inode + ", pos: " + raf.getFilePointer());
+              + path + ", inode: " + inode + ", pos: " + inChannel.position());
       updateFilePos(posTmp);
       return null;
     }
@@ -169,12 +182,20 @@ public class TailFile {
   }
 
   private void readFile() throws IOException {
-    if ((raf.length() - raf.getFilePointer()) < BUFFER_SIZE) {
-      buffer = new byte[(int) (raf.length() - raf.getFilePointer())];
+//    if ((raf.length() - raf.getFilePointer()) < BUFFER_SIZE) {
+//      buffer = new byte[(int) (raf.length() - raf.getFilePointer())];
+//    } else {
+//      buffer = new byte[BUFFER_SIZE];
+//    }
+//    raf.read(buffer, 0, buffer.length);
+    if ((inChannel.size() - inChannel.position()) < BUFFER_SIZE) {
+      buffer = new byte[(int) (inChannel.size() - inChannel.position())];
     } else {
       buffer = new byte[BUFFER_SIZE];
     }
-    raf.read(buffer, 0, buffer.length);
+    ByteBuffer byteBuffer = ByteBuffer.wrap(buffer);
+    inChannel.read(byteBuffer);
+
     bufferPos = 0;
   }
 
@@ -190,7 +211,8 @@ public class TailFile {
     LineResult lineResult = null;
     while (true) {
       if (bufferPos == NEED_READING) {
-        if (raf.getFilePointer() < raf.length()) {
+//        if (raf.getFilePointer() < raf.length()) {
+          if (inChannel.position() < inChannel.size()) {
           readFile();
         } else {
           if (oldBuffer.length > 0) {
@@ -237,8 +259,10 @@ public class TailFile {
 
   public void close() {
     try {
-      raf.close();
-      raf = null;
+//      raf.close();
+//      raf = null;
+      inChannel.close();
+      inChannel = null;
       long now = System.currentTimeMillis();
       setLastUpdated(now);
     } catch (IOException e) {

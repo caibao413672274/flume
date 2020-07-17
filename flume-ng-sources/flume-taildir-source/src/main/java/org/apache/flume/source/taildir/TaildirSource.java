@@ -22,6 +22,8 @@ import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstant
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -34,6 +36,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.commons.codec.Charsets;
+import org.apache.commons.lang.StringUtils;
 import org.apache.flume.ChannelException;
 import org.apache.flume.Context;
 import org.apache.flume.Event;
@@ -203,7 +207,7 @@ public class TaildirSource extends AbstractSource implements
     return batchSize;
   }
 
-  private Map<String, String> selectByKeys(Map<String, String> map, String[] keys) {
+  private Map<String, String> selectByKeys(ImmutableMap<String, String> map, String[] keys) {
     Map<String, String> result = Maps.newHashMap();
     for (String key : keys) {
       if (map.containsKey(key)) {
@@ -261,6 +265,33 @@ public class TaildirSource extends AbstractSource implements
     return maxBackOffSleepInterval;
   }
 
+  private static String agentIP;
+  private void initAddr(){
+    if(StringUtils.isNotEmpty(agentIP))return;
+    InetAddress addr;
+    try {
+      addr = InetAddress.getLocalHost();
+      agentIP = addr.getHostAddress();
+    } catch (UnknownHostException e) {
+      logger.warn("Could not get local host address. Exception follows.", e);
+    }
+  }
+  /**
+   * 雅典娜接口日志，加入当前客户端ip
+   * @param events
+   */
+  private void athenaLogProcess(List<Event> events) {
+    initAddr();
+    StringBuilder builder =null;
+    for(Event event : events) {
+      builder = new StringBuilder();
+      byte[] byteBody = event.getBody();
+      String body = new String(byteBody, Charsets.UTF_8);
+
+      builder.append(body).append("@@@" + agentIP);
+      event.setBody(builder.toString().trim().getBytes());
+    }
+  }
   private boolean tailFileProcess(TailFile tf, boolean backoffWithoutNL)
       throws IOException, InterruptedException {
     long batchCount = 0;
@@ -270,6 +301,9 @@ public class TaildirSource extends AbstractSource implements
       if (events.isEmpty()) {
         return false;
       }
+      //加入当前客户端IP地址
+      athenaLogProcess(events);
+
       sourceCounter.addToEventReceivedCount(events.size());
       sourceCounter.incrementAppendBatchReceivedCount();
       try {
@@ -301,7 +335,7 @@ public class TaildirSource extends AbstractSource implements
   private void closeTailFiles() throws IOException, InterruptedException {
     for (long inode : idleInodes) {
       TailFile tf = reader.getTailFiles().get(inode);
-      if (tf.getRaf() != null) { // when file has not closed yet
+      if (tf.getFileChannel() != null) { // when file has not closed yet
         tailFileProcess(tf, false);
         tf.close();
         logger.info("Closed file: " + tf.getPath() + ", inode: " + inode + ", pos: " + tf.getPos());
@@ -319,7 +353,7 @@ public class TaildirSource extends AbstractSource implements
       try {
         long now = System.currentTimeMillis();
         for (TailFile tf : reader.getTailFiles().values()) {
-          if (tf.getLastUpdated() + idleTimeout < now && tf.getRaf() != null) {
+          if (tf.getLastUpdated() + idleTimeout < now && tf.getFileChannel() != null) {
             idleInodes.add(tf.getInode());
           }
         }

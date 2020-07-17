@@ -197,6 +197,11 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
     if (events.isEmpty()) {
       return events;
     }
+    else{
+      //去除null行
+      events.removeIf((a->a==null||a.getBody().length==0));
+
+    }
 
     Map<String, String> headers = currentFile.getHeaders();
     if (annotateFileName || (headers != null && !headers.isEmpty())) {
@@ -216,7 +221,7 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
   @Override
   public void close() throws IOException {
     for (TailFile tf : tailFiles.values()) {
-      if (tf.getRaf() != null) tf.getRaf().close();
+      if (tf.getFileChannel() != null) tf.getFileChannel().close();
     }
   }
 
@@ -257,7 +262,7 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
         } else {
           boolean updated = tf.getLastUpdated() < f.lastModified() || tf.getPos() != f.length();
           if (updated) {
-            if (tf.getRaf() == null) {
+            if (tf.getFileChannel() == null) {
               tf = openFile(f, headers, inode, tf.getPos());
             }
             if (f.length() < tf.getPos()) {
